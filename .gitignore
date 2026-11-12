@@ -27,3 +27,10 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+### Project ###
+.idea/
+.metadata/
+.vs/
+target/
+*.iml
