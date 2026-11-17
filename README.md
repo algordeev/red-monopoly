@@ -1,5 +1,7 @@
 # Red Monopoly
 
+[![Build](https://github.com/algordeev/red-monopoly/actions/workflows/build.yml/badge.svg)](https://github.com/algordeev/red-monopoly/actions/workflows/build.yml)
+
 A digital twist on the classic Monopoly board game, set in the USSR. Buy, trade, and build your way across the Soviet Union—from Moscow to Vladivostok—while managing five-year plans, factories, and political intrigue.
 
 ---
@@ -110,50 +112,54 @@ Below you will find the rules and features of Red Monopoly. Jump straight to any
 
 ## Project Configuration
 
-1. **Prerequisites**  
-   - Java 17 or higher  
-   - Maven 3.x  
-   - Git  
+1. **Prerequisites**
+   - JDK 17 or newer
+   - Maven 3.6+
+   - Git
 
-2. **Clone the repository**  
+2. **Clone the repository**
    ```bash
-   git clone https://github.com/SwEng-UCM/red-monopoly.git
+   git clone https://github.com/algordeev/red-monopoly.git
    cd red-monopoly
    ```
 
-3. **Import into IntelliJ IDEA**  
-   - Open IntelliJ IDEA and choose **File → Open…**  
-   - Select the project’s root folder.  
-   - IntelliJ will detect the Maven project and download dependencies.
-
-4. **Build the JAR**  
+3. **Build**
    ```bash
    mvn clean package
-   ```  
-   This produces:
    ```
-   target/monopoly-soviet.jar
+   This compiles the sources, runs the tests, and produces a single runnable jar with all
+   dependencies (Gson, JGoodies Looks) and assets bundled inside:
    ```
+   target/red-monopoly.jar
+   ```
+
+4. **Project layout**
+
+   | Path         | Contents                                              |
+   |--------------|-------------------------------------------------------|
+   | `src/`       | Java sources (`Model`, `View`, `Controller`, `Launcher`) |
+   | `resources/` | Images and audio, packaged onto the classpath         |
+   | `test/`      | JUnit 5 tests                                         |
+   | `games/`     | Saved games (JSON)                                    |
+
+   **IDE:** IntelliJ IDEA, Eclipse, and VS Code can all open the folder directly; they detect
+   `pom.xml` and import it as a Maven project.
 
 ---
 
 ## Running the Game
 
-### A. From IntelliJ IDEA
+From the repository root, after building:
 
-1. In the **src** view, open `src/Launcher/Main.java` (or your main class).  
-2. Click the green ▶️ run icon next to the `main` method. No launch parameters needed.
-3. The game will start (GUI or embedded web server, depending on your setup).
+```bash
+java -jar target/red-monopoly.jar
+```
 
-### B. From the Command Line
+The game opens as a desktop window. Run it from the repository root if you want to load the
+sample saves in `games/`, because saves are read from and written to `./games` relative to the
+current directory.
 
-1. Install a Java Runtime Environment (JRE), with its latest version. 
-2. Ensure you’ve built or possess the JAR file (`red-monopoly.jar`).  
-3. Run:
-   ```bash
-   java -jar red-monopoly.jar
-   ```
-4. It is a desktop GUI, therefore the game window will appear automatically.
+To run from an IDE, run `Launcher.Main` (`src/Launcher/Main.java`). It takes no arguments.
 
 ---
 
