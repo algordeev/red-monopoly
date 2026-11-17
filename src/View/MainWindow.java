@@ -20,7 +20,7 @@ import java.util.List;
 public class MainWindow extends JFrame {
     // Static URLs for resources
     static final URL CLICK_SOUND_URL =
-            MainWindow.class.getResource("/audio/click-buttons-ui-menu-sounds-effects-button-8-205394.wav");
+            MainWindow.class.getResource("/click-buttons-ui-menu-sounds-effects-button-8-205394.wav");
     static final URL MENU_MUSIC_URL =
             MainWindow.class.getResource("/Dark_is_the_Night_-_Soviet_WW2_Song.wav");
     private static final URL BG_IMAGE_URL =

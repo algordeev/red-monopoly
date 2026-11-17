@@ -73,7 +73,7 @@ public class GameManager {
             System.out.println("Auto-creating new Human player '" + id + "'");
             p = new Model.Player(id);
             // you may want to give them a default avatar path here
-            p.setAvatarPath("resources/players/8.png");
+            p.setAvatarPath("/players/player8.png");
             controller.getMonopolyGame().getPlayers().add(p);
         }
 

@@ -1,7 +1,6 @@
 package Model;
 
 import com.google.gson.*;
-import com.google.gson.internal.*;
 import com.google.gson.reflect.TypeToken;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
@@ -52,6 +51,7 @@ public final class RuntimeTypeAdapterFactory<T> implements TypeAdapterFactory {
             return null;
         }
 
+        final TypeAdapter<JsonElement> jsonElementAdapter = gson.getAdapter(JsonElement.class);
         final Map<String, TypeAdapter<?>> labelToDelegate = new LinkedHashMap<>();
         final Map<Class<?>, TypeAdapter<?>> delegateToLabel = new LinkedHashMap<>();
         for (Map.Entry<String, Class<?>> entry : labelToSubtype.entrySet()) {
@@ -80,12 +80,12 @@ public final class RuntimeTypeAdapterFactory<T> implements TypeAdapterFactory {
                     jsonObject = clone;
                 }
                 jsonObject.add(typeFieldName, new JsonPrimitive(label));
-                Streams.write(jsonObject, out);
+                jsonElementAdapter.write(out, jsonObject);
             }
 
             @Override
             public R read(JsonReader in) throws IOException {
-                JsonElement jsonElement = Streams.parse(in);
+                JsonElement jsonElement = jsonElementAdapter.read(in);
                 JsonObject jsonObject = jsonElement.getAsJsonObject();
                 JsonElement labelJsonElement = jsonObject.remove(typeFieldName);
                 if (labelJsonElement == null) {
