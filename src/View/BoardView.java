@@ -53,6 +53,16 @@ public class BoardView extends JLayeredPane {
         overlayPanel.repaint();
     }
 
+    /** Draws a player's token on a given tile while it is animating. */
+    public void setTokenDisplayPosition(Player player, int tileIndex) {
+        overlayPanel.setDisplayPosition(player, tileIndex);
+    }
+
+    /** Draws the player's token at their real position again. */
+    public void clearTokenDisplayPosition(Player player) {
+        overlayPanel.clearDisplayPosition(player);
+    }
+
     /** Expose boardPanel for raw access. */
     public BoardPanel getBoardPanel() {
         return boardPanel;

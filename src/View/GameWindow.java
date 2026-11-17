@@ -5,6 +5,7 @@ import Controller.NetworkClient;
 import Model.GameState;
 import Model.Player;
 import Model.AIPlayer;
+import Model.TurnHandler;
 import com.jgoodies.looks.plastic.Plastic3DLookAndFeel;
 
 import javax.swing.*;
@@ -15,6 +16,7 @@ import java.awt.*;
 import java.awt.event.*;
 import java.io.IOException;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.List;
 
 public class GameWindow extends JFrame {
@@ -30,10 +32,25 @@ public class GameWindow extends JFrame {
     private JLabel currentPlayerLabel;
     private JLabel currentBalanceLabel;
     private JButton rollDiceButton;
+    private JButton undoButton;
     private MusicPlayer inGameMusic;
     private BoardView boardView;
     private DualDicePanel dualDicePanel;
     private PlayerInfoWindow playerInfoWindow;
+
+    // ── Local turn flow ───────────────────────────────────
+    /** Wait for the dice animation (DicePanel runs for 2 s) before moving. */
+    private static final int DICE_ANIMATION_MS = 2000;
+    /** Pause before an AI player rolls, so humans can follow what is happening. */
+    private static final int AI_THINK_MS = 1200;
+    /** Time per tile while a token walks along the board. */
+    private static final int STEP_MS = 140;
+
+    /** True from the moment a turn is scheduled until it is fully resolved. Guards every control. */
+    private boolean turnInProgress;
+    private boolean disposed;
+    private final List<Timer> activeTimers = new ArrayList<>();
+    private final Runnable modelChangeListener = () -> SwingUtilities.invokeLater(this::refreshUIAfterExternalMove);
 
     public GameWindow(Controller controller,
                       MainWindow mainWindow,
@@ -57,13 +74,16 @@ public class GameWindow extends JFrame {
 
         initGUI();
         initMusic();
-        initNetworkingOrAI();
+        _controller.getMonopolyGame().addChangeListener(modelChangeListener);
 
-        // Final one-time UI sync
+        // Sync the UI before the first AI turn can start.
         updateCurrentPlayerLabel();
         updateCurrentBalanceLabel();
         boardView.refreshBoard();
         boardView.drawPlayerTokens(_controller.getAllPlayers());
+        updateControls();
+
+        initNetworkingOrAI();
     }
 
     private void initGUI() {
@@ -94,8 +114,8 @@ public class GameWindow extends JFrame {
                 "Leave Game", e -> onLeave())));
         bottom.add(makeButtonCard(createImageButton("/playerInfoWindow.png",
                 "Show player info", e -> onPlayerInfo())));
-        bottom.add(makeButtonCard(createImageButton("/undo.png",
-                "Undo Last Action", e -> onUndo())));
+        undoButton = createImageButton("/undo.png", "Undo last turn", e -> onUndo());
+        bottom.add(makeButtonCard(undoButton));
 
         // ── Board & dice ───────────────────────────────────
         boardView = new BoardView(_controller);
@@ -133,6 +153,11 @@ public class GameWindow extends JFrame {
 
         addWindowListener(new WindowAdapter() {
             @Override public void windowClosed(WindowEvent e) {
+                // Stop any pending turn so AI players don't keep playing after the window is gone.
+                disposed = true;
+                activeTimers.forEach(Timer::stop);
+                activeTimers.clear();
+                _controller.getMonopolyGame().removeChangeListener(modelChangeListener);
                 inGameMusic.stopMusic();
                 if (MENU_MUSIC_URL != null) {
                     _mainWindow.getMusicPlayer().playMusic(String.valueOf(MENU_MUSIC_URL));
@@ -213,19 +238,98 @@ public class GameWindow extends JFrame {
                         "Network error: " + ex.getMessage(),
                         "Error", JOptionPane.ERROR_MESSAGE);
             }
-        } else {
-            int[] dice = _controller.rollDice();
-            dualDicePanel.startAnimation(dice[0], dice[1]);
-            new Timer(2000, evt -> {
-                ((Timer)evt.getSource()).stop();
-                _controller.movePlayerAfterDiceRoll(dice);
-                updateCurrentPlayerLabel();
-                updateCurrentBalanceLabel();
-                boardView.refreshBoard();
-                boardView.drawPlayerTokens(_controller.getAllPlayers());
-                checkAndTriggerAITurn();
-            }).start();
+            return;
         }
+        if (!canHumanAct()) return; // ignore clicks that slip through during a turn
+        playLocalTurn();
+    }
+
+    /** A local human may roll or undo: no turn running, game not over, and it is a human's turn. */
+    private boolean canHumanAct() {
+        return netClient == null && !disposed && !turnInProgress && !_controller.isGameOver()
+                && !_controller.getAllPlayers().isEmpty()
+                && !(_controller.getCurrentPlayer() instanceof AIPlayer);
+    }
+
+    private void updateControls() {
+        if (netClient != null) {
+            undoButton.setEnabled(false); // undo would only change this machine's copy
+            return;
+        }
+        boolean humanCanAct = canHumanAct();
+        rollDiceButton.setEnabled(humanCanAct);
+        undoButton.setEnabled(humanCanAct && _controller.canUndo());
+    }
+
+    /**
+     * Plays one turn for the current player, human or AI:
+     * dice animation, then the token walks to its tile, then the tile resolves (cards,
+     * purchases, rent), then the next turn starts. Only one turn can run at a time.
+     */
+    private void playLocalTurn() {
+        turnInProgress = true;
+        updateControls();
+
+        int[] dice = _controller.rollDice();
+        dualDicePanel.startAnimation(dice[0], dice[1]);
+        schedule(DICE_ANIMATION_MS, () -> {
+            TurnHandler.MovePlan plan = _controller.startTurn(dice);
+            updateCurrentBalanceLabel();
+            animateMove(plan, () -> {
+                _controller.finishTurn(plan);
+                turnInProgress = false;
+                refreshUIAfterExternalMove();
+                if (_controller.isGameOver()) {
+                    showGameOver();
+                } else {
+                    checkAndTriggerAITurn();
+                }
+            });
+        });
+    }
+
+    /** Walks the token one tile at a time from where it started to where it is now. */
+    private void animateMove(TurnHandler.MovePlan plan, Runnable onArrived) {
+        if (!plan.moved()) {
+            boardView.drawPlayerTokens(_controller.getAllPlayers());
+            onArrived.run();
+            return;
+        }
+        Player player = plan.player();
+        int boardSize = _controller.getBoardTiles().size();
+        int[] step = {0};
+        boardView.setTokenDisplayPosition(player, plan.from());
+
+        Timer walker = new Timer(STEP_MS, null);
+        walker.addActionListener(e -> {
+            step[0]++;
+            boardView.setTokenDisplayPosition(player, (plan.from() + step[0]) % boardSize);
+            if (step[0] >= plan.steps()) {
+                walker.stop();
+                activeTimers.remove(walker);
+                boardView.clearTokenDisplayPosition(player);
+                onArrived.run();
+            }
+        });
+        activeTimers.add(walker);
+        walker.start();
+    }
+
+    /** Runs the action once after a delay, unless the window has been closed. */
+    private void schedule(int delayMs, Runnable action) {
+        Timer t = new Timer(delayMs, null);
+        t.setRepeats(false);
+        t.addActionListener(e -> {
+            activeTimers.remove(t);
+            if (!disposed) action.run();
+        });
+        activeTimers.add(t);
+        t.start();
+    }
+
+    private void showGameOver() {
+        updateCurrentPlayerLabel();
+        updateControls();
     }
 
     private void onLeave() {
@@ -257,17 +361,20 @@ public class GameWindow extends JFrame {
     }
 
     private void onUndo() {
-        _controller.undoLastCommand();
-        updateCurrentPlayerLabel();
-        updateCurrentBalanceLabel();
-        boardView.refreshBoard();
-        boardView.drawPlayerTokens(_controller.getAllPlayers());
+        if (!canHumanAct() || !_controller.canUndo()) return;
+        _controller.undoLastTurn();
+        refreshUIAfterExternalMove();
+        checkAndTriggerAITurn();
     }
 
     private void updateCurrentPlayerLabel() {
         List<Player> ps = _controller.getAllPlayers();
         if (ps.isEmpty()) {
             currentPlayerLabel.setText("Current Player: (loading...)");
+        } else if (_controller.isGameOver()) {
+            currentPlayerLabel.setText(ps.size() == 1
+                    ? "Game Over! Winner: " + ps.get(0).getName()
+                    : "Game Over!");
         } else {
             currentPlayerLabel.setText("Current Player: " + _controller.getCurrentPlayerName());
         }
@@ -288,26 +395,23 @@ public class GameWindow extends JFrame {
         updateCurrentBalanceLabel();
         boardView.refreshBoard();
         boardView.drawPlayerTokens(_controller.getAllPlayers());
+        if (playerInfoWindow != null && playerInfoWindow.isDisplayable()) {
+            playerInfoWindow.refreshData();
+        }
+        updateControls();
     }
 
+    /** If it is an AI player's turn, schedules it. Safe to call any number of times. */
     private void checkAndTriggerAITurn() {
+        if (netClient != null || disposed || turnInProgress || _controller.isGameOver()) return;
         List<Player> ps = _controller.getAllPlayers();
-        if (ps.isEmpty()) return;
-        Player cur = _controller.getCurrentPlayer();
-        if (cur instanceof AIPlayer) {
-            new Timer(2000, evt -> {
-                ((Timer)evt.getSource()).stop();
-                int[] dice = _controller.rollDice();
-                dualDicePanel.startAnimation(dice[0], dice[1]);
-                new Timer(2000, evt2 -> {
-                    ((Timer)evt2.getSource()).stop();
-                    ((AIPlayer)cur).takeTurnWithDice(
-                            dice, _controller.getMonopolyGame(), _controller);
-                    refreshUIAfterExternalMove();
-                    checkAndTriggerAITurn();
-                }).start();
-            }).start();
+        if (ps.isEmpty() || !(_controller.getCurrentPlayer() instanceof AIPlayer)) {
+            updateControls();
+            return;
         }
+        turnInProgress = true; // reserve the turn now so the roll button stays disabled
+        updateControls();
+        schedule(AI_THINK_MS, this::playLocalTurn);
     }
 
     private JButton createImageButton(String resourcePath, String tip, ActionListener l) {
