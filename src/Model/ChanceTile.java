@@ -1,6 +1,5 @@
 package Model;
 
-import javax.swing.JOptionPane;
 import java.util.Random;
 
 public class ChanceTile extends Tile {
@@ -32,22 +31,20 @@ public class ChanceTile extends Tile {
         int index = random.nextInt(CHANCE_CARDS.length);
         String card = CHANCE_CARDS[index];
 
-        JOptionPane.showMessageDialog(null,
-                "Chance Card: " + card,
-                "Chance!",
-                JOptionPane.INFORMATION_MESSAGE);
+        Prompter.get().inform("Chance!", "Chance Card: " + card);
 
         applyChanceEffect(player, index);
     }
 
     private void applyChanceEffect(Player player, int index) {
+        MonopolyGame game = MonopolyGame.getInstance();
         switch (index) {
             case 0: // Five-Year Plan Success!
                 player.addMoney(200);
                 break;
-            case 1: // Promotion - Move to Moscow
-                player.setPosition(39);
+            case 1: // Promotion - Advance to Moscow and collect 50
                 player.addMoney(50);
+                game.advancePlayerTo(player, 39);
                 break;
             case 2: // Factory Inefficiency
                 player.deductMoney(100);
@@ -56,53 +53,45 @@ public class ChanceTile extends Tile {
                 player.addMoney(100);
                 break;
             case 4: // Housing Relocation - Move to the nearest unowned property.
-                Board board = Board.getInstance();
+                Board board = game.getBoard();
                 int currentPos = player.getPosition();
                 int boardSize = board.getSize();
-                boolean found = false;
+                Integer target = null;
                 for (int i = 1; i < boardSize; i++) {
                     int newPos = (currentPos + i) % boardSize;
                     Tile tile = board.getTile(newPos);
-                    if (tile instanceof PropertyTile) {
-                        PropertyTile propertyTile = (PropertyTile) tile;
-                        if (propertyTile.getOwner() == null) {
-                            player.setPosition(newPos);
-                            found = true;
-                            break;
-                        }
+                    if (tile instanceof PropertyTile propertyTile && propertyTile.getOwner() == null) {
+                        target = newPos;
+                        break;
                     }
                 }
-                if (!found) {
-                    JOptionPane.showMessageDialog(null,
-                            "No unowned property found. You remain at your current position.",
-                            "Housing Relocation",
-                            JOptionPane.INFORMATION_MESSAGE);
+                if (target != null) {
+                    game.advancePlayerTo(player, target);
+                } else {
+                    Prompter.get().inform("Housing Relocation", "No unowned property found. You remain at your current position.");
                 }
                 break;
-            case 5: // Agricultural Harvest - Collect 50 ₽ from each player.
-                MonopolyGame game = MonopolyGame.getInstance();
+            case 5: // Agricultural Harvest - Collect 50 from each player.
                 for (Player other : game.getPlayers()) {
-                    if (!other.equals(player)) {
+                    if (other != player) {
                         other.deductMoney(50);
                         player.addMoney(50);
                     }
                 }
                 break;
-            case 6: // Work Unit Overperformance - Move forward 3 spaces and collect 25 ₽.
-                player.setPosition(player.getPosition() + 3);
+            case 6: // Work Unit Overperformance - Move forward 3 spaces and collect 25.
                 player.addMoney(25);
+                game.advancePlayerTo(player, (player.getPosition() + 3) % game.getBoard().getSize());
                 break;
-
             case 7: // KGB Investigation - Lose a turn.
                 player.skipNextTurn();
-
                 break;
             case 8: // Power Outage
                 player.deductMoney(75);
                 break;
-
             case 9: // Sent to Siberia - Go to Jail.
                 player.goToJail();
+                game.fireStateChanged();
                 break;
             case 10: // Infrastructure Project
                 player.deductMoney(150);
@@ -110,7 +99,7 @@ public class ChanceTile extends Tile {
             case 11: // Worker Uprising - Skip your next turn.
                 player.skipNextTurn();
                 break;
-            case 12: // Bribe Official - Pay 50 ₽, then take another turn.
+            case 12: // Bribe Official - Pay 50, then take another turn.
                 player.deductMoney(50);
                 player.setExtraTurn(true);
                 break;

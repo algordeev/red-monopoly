@@ -1,6 +1,7 @@
 package Model;
 
 public class JailTile extends Tile {
+    public static final int JAIL_POSITION = 10;
 
     public JailTile(String name, int position) {
         super(name, position);

@@ -5,6 +5,8 @@ import java.util.List;
 import com.google.gson.annotations.SerializedName;
 
 public class Player {
+    public static final int STARTING_MONEY = 1500;
+
     private String name;
     private int position;
     private int money;
@@ -24,13 +26,14 @@ public class Player {
     // New fields for turn management
     private boolean skipTurn = false;
     private boolean extraTurn = false;
+    private int getOutOfJailCards = 0;
 
     protected String type;
 
     public Player(String name) {
         this.name = name;
         this.position = 0;
-        this.money = 1500; // Default starting money
+        this.money = STARTING_MONEY;
         this.inJail = false;
     }
 
@@ -98,6 +101,10 @@ public class Player {
         skipTurn = false;
     }
 
+    public void setSkipTurn(boolean skipTurn) {
+        this.skipTurn = skipTurn;
+    }
+
     // Methods for extra turn
     public void setExtraTurn(boolean extraTurn) {
         this.extraTurn = extraTurn;
@@ -114,11 +121,29 @@ public class Player {
         extraTurn = false;
     }
 
-    // Example placeholder for going to jail
+    /** Sends the player straight to the Gulag tile. No GO salary is paid. */
     public void goToJail() {
+        setPosition(JailTile.JAIL_POSITION);
         setInJail(true);
         resetJailTurn();
         System.out.println(name + " has been sent to jail!");
+    }
+
+    // "Get out of Gulag free" cards
+    public int getGetOutOfJailCards() {
+        return getOutOfJailCards;
+    }
+
+    public void setGetOutOfJailCards(int count) {
+        this.getOutOfJailCards = count;
+    }
+
+    public void addGetOutOfJailCard() {
+        getOutOfJailCards++;
+    }
+
+    public void useGetOutOfJailCard() {
+        if (getOutOfJailCards > 0) getOutOfJailCards--;
     }
 
     // Property ownership

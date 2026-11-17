@@ -1,8 +1,9 @@
 package Model;
 
-import javax.swing.JOptionPane;
 
+/** Charges a percentage of the player's current balance. */
 public class TaxTile extends Tile {
+    /** Percentage of the balance to pay, e.g. 10 means 10 %. */
     private int taxAmount;
 
     public TaxTile(String name, int position, int taxAmount) {
@@ -10,16 +11,16 @@ public class TaxTile extends Tile {
         this.taxAmount = taxAmount;
     }
 
+    public int calculateTax(Player player) {
+        return Math.max(0, player.getMoney()) * taxAmount / 100;
+    }
+
     @Override
     public void action(Player player) {
-        int taxToDeduct;
-        taxToDeduct = player.getMoney()/taxAmount;
-        JOptionPane.showMessageDialog(null,
-                "You landed on " + name + " tile. Pay " + taxAmount + " % of your balance(" + taxToDeduct + "₽)",
-                "Tax Tile",
-                JOptionPane.INFORMATION_MESSAGE);
-
-        player.deductMoney(taxToDeduct);
+        int tax = calculateTax(player);
+        Prompter.get().inform("Tax Tile", player.getName() + " landed on " + name + ". Pay " + taxAmount
+                        + " % of your balance (" + tax + " ₽).");
+        player.deductMoney(tax);
     }
 
     public int getTaxAmount() {

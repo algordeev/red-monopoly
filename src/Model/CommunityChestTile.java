@@ -1,6 +1,5 @@
 package Model;
 
-import javax.swing.JOptionPane;
 import java.util.Random;
 
 public class CommunityChestTile extends Tile {
@@ -27,15 +26,13 @@ public class CommunityChestTile extends Tile {
         int index = random.nextInt(COMMUNITY_CARDS.length);
         String card = COMMUNITY_CARDS[index];
 
-        JOptionPane.showMessageDialog(null,
-                "Community Chest Card: " + card,
-                "Community Chest!",
-                JOptionPane.INFORMATION_MESSAGE);
+        Prompter.get().inform("Community Chest!", "Community Chest Card: " + card);
 
         applyCommunityEffect(player, index);
     }
 
     private void applyCommunityEffect(Player player, int index) {
+        MonopolyGame game = MonopolyGame.getInstance();
         switch (index) {
             case 0: // Glorious Contribution to the Motherland: Collect 200 ₽.
                 player.addMoney(200);
@@ -53,18 +50,16 @@ public class CommunityChestTile extends Tile {
                 player.deductMoney(75);
                 break;
             case 5: // Advance to Red Square: Collect 200 ₽.
-                // Move to Moscow(position 39)
-                player.setPosition(39);
                 player.addMoney(200);
+                game.advancePlayerTo(player, 39); // Moscow
+
                 break;
-            case 6: // Get Out of Gulag Free Card.
-                if (player.isInJail())
-                    player.setInJail(false);
+            case 6: // Get Out of Gulag Free Card - kept until needed.
+                player.addGetOutOfJailCard();
                 break;
             case 7: // Comrade Solidarity Contribution: Collect 50 ₽ from each player.
-                MonopolyGame game = MonopolyGame.getInstance();
                 for (Player other : game.getPlayers()) {
-                    if (!other.equals(player)) {
+                    if (other != player) {
                         other.deductMoney(50);
                         player.addMoney(50);
                     }

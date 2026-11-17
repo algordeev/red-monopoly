@@ -11,13 +11,11 @@ public interface AIStrategy {
     void playTurn(AIPlayer aiPlayer, MonopolyGame game, Controller controller);
 
     /**
-     * Overloaded method so that the AI can use externally provided dice values
-     * (for consistent dice animation).
-     * By default, it ignores the passed dice and rolls its own.
+     * Plays the turn with dice that were already rolled (and shown to the user),
+     * instead of rolling new ones.
      */
     default void playTurn(AIPlayer aiPlayer, MonopolyGame game, Controller controller, int[] diceValues) {
-        // Default: ignore diceValues and call the original method.
-        playTurn(aiPlayer, game, controller);
+        System.out.println(controller.movePlayerAfterDiceRoll(diceValues));
     }
     boolean shouldBuyTile(AIPlayer aiPlayer, Tile tile);
 
