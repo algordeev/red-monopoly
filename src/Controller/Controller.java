@@ -44,7 +44,9 @@ public class Controller {
         if (count < 1) count = 1;
         if (count > 8) count = 8;
 
+        _game.resetForNewGame();
         _game.getPlayers().clear();
+        commandHistory.clear();
 
         for (int i = 0; i < count; i++) {
             String name = playerNames.get(i).trim();
@@ -95,24 +97,41 @@ public class Controller {
     }
 
     /**
-     * Delegates the dice roll turn processing to the TurnHandler.
-     * All the game rules regarding moving, jail logic, tile interactions, and elimination are handled there.
+     * Plays the current player's whole turn at once (rules in TurnHandler).
+     * Used by the network server and the AI strategies; the local GUI uses
+     * {@link #startTurn} and {@link #finishTurn} so it can animate in between.
      *
      * @param dice the two dice values as an array.
      * @return a message describing the outcome of the turn.
      */
     public String movePlayerAfterDiceRoll(int[] dice) {
-        MoveCommand command = new MoveCommand(_game, _game.getCurrentPlayer(), dice);
-        executeCommand(command);
-
-        return turnHandler.processTurn(_game.getCurrentPlayer(), dice);
+        return finishTurn(startTurn(dice));
     }
 
+    /** Phase 1: records an undo point, applies jail rules and moves the current player. */
+    public TurnHandler.MovePlan startTurn(int[] dice) {
+        Player player = _game.getCurrentPlayer();
+        executeCommand(new MoveCommand(_game, player));
+        return turnHandler.startTurn(player, dice);
+    }
+
+    /** Phase 2: resolves the tile the player landed on and passes the turn on. */
+    public String finishTurn(TurnHandler.MovePlan plan) {
+        return turnHandler.finishTurn(plan);
+    }
+
+    public boolean isGameOver() {
+        return _game.isGameOver();
+    }
 
     // --- Command Pattern Support ---
     public void executeCommand(Command command) {
         command.execute();
         commandHistory.push(command);
+    }
+
+    public boolean canUndo() {
+        return !commandHistory.isEmpty();
     }
 
     public void undoLastCommand() {
@@ -124,9 +143,19 @@ public class Controller {
         }
     }
 
-    public void movePlayerWithCommand(int[] dice) {
-        MoveCommand command = new MoveCommand(_game, _game.getCurrentPlayer(), dice);
-        executeCommand(command);
+    /**
+     * Undoes the most recent turn. When the game has human players, AI turns are rolled
+     * back too, so the game returns to the start of the last human turn.
+     */
+    public void undoLastTurn() {
+        boolean hasHumans = commandHistory.stream()
+                .anyMatch(c -> c instanceof MoveCommand m && !(m.getPlayer() instanceof AIPlayer));
+        while (!commandHistory.isEmpty()) {
+            Command command = commandHistory.pop();
+            command.undo();
+            boolean aiTurn = command instanceof MoveCommand m && m.getPlayer() instanceof AIPlayer;
+            if (!hasHumans || !aiTurn) break;
+        }
     }
 
     public Stack<Command> getCommandHistory() {
@@ -216,55 +245,7 @@ public class Controller {
                 return;
             }
 
-            // Restore core game state
-            _game.getPlayers().clear();
-            _game.getPlayers().addAll(state.getPlayers());
-            _game.getBoard().setTiles(state.getBoard().getTiles());
-            _game.setCurrentPlayerIndex(state.getCurrentPlayerIndex());
-
-            // Fix ownership references on tiles and players
-            for (Player player : _game.getPlayers()) {
-                // Fix PropertyTile references
-                List<PropertyTile> linkedProps = new ArrayList<>();
-                List<PropertyTile> playerProps = player.getOwnedProperties();
-                if (playerProps != null) {
-                    for (PropertyTile p : playerProps) {
-                        for (Tile tile : _game.getBoard().getTiles()) {
-                            if (tile instanceof PropertyTile && tile.getName().equals(p.getName())) {
-                                PropertyTile boardTile = (PropertyTile) tile;
-                                boardTile.setOwner(player);
-                                linkedProps.add(boardTile);
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                player.setOwnedProperties(linkedProps);
-
-                // Fix RailroadTile references
-                List<RailroadTile> linkedRails = new ArrayList<>();
-                List<RailroadTile> playerRails = player.getOwnedRailroads();
-                if (playerRails != null) {
-                    for (RailroadTile r : playerRails) {
-                        for (Tile tile : _game.getBoard().getTiles()) {
-                            if (tile instanceof RailroadTile && tile.getName().equals(r.getName())) {
-                                RailroadTile boardTile = (RailroadTile) tile;
-                                boardTile.setOwner(player);
-                                linkedRails.add(boardTile);
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                player.setOwnedRailroads(linkedRails);
-                if (player instanceof AIPlayer ai) {
-                    ai.restoreStrategyFromDifficulty();
-                }
-
-            }
-
+            restoreState(state);
             System.out.println("Game loaded from " + file.getAbsolutePath());
 
 
@@ -317,60 +298,43 @@ public class Controller {
 
 
     public void loadGameState(GameState state) {
-        // 1. Restore player list
+        restoreState(state);
+    }
+
+    /**
+     * Installs a deserialized game state. Saved files store each player's tiles as copies,
+     * so ownership is re-linked to the board's own tile objects by name.
+     */
+    private void restoreState(GameState state) {
         _game.getPlayers().clear();
         _game.getPlayers().addAll(state.getPlayers());
-
-        // 2. Restore board tiles
         _game.getBoard().setTiles(state.getBoard().getTiles());
-
-        // 3. Restore current player index
         _game.setCurrentPlayerIndex(state.getCurrentPlayerIndex());
+        _game.setGameOver(false);
 
-        // 4. Fix up ownership pointers on tiles and players
         for (Player player : _game.getPlayers()) {
-            // Properties
-            List<PropertyTile> linkedProps = new ArrayList<>();
-            List<PropertyTile> savedProps = player.getOwnedProperties();
-            if (savedProps != null) {
-                for (PropertyTile p : savedProps) {
-                    for (Tile t : _game.getBoard().getTiles()) {
-                        if (t instanceof PropertyTile && t.getName().equals(p.getName())) {
-                            PropertyTile boardProp = (PropertyTile) t;
-                            boardProp.setOwner(player);
-                            linkedProps.add(boardProp);
-                            break;
-                        }
-                    }
-                }
-            }
-            player.setOwnedProperties(linkedProps);
-
-            // Railroads
-            List<RailroadTile> linkedRails = new ArrayList<>();
-            List<RailroadTile> savedRails = player.getOwnedRailroads();
-            if (savedRails != null) {
-                for (RailroadTile r : savedRails) {
-                    for (Tile t : _game.getBoard().getTiles()) {
-                        if (t instanceof RailroadTile && t.getName().equals(r.getName())) {
-                            RailroadTile boardRail = (RailroadTile) t;
-                            boardRail.setOwner(player);
-                            linkedRails.add(boardRail);
-                            break;
-                        }
-                    }
-                }
-            }
-            player.setOwnedRailroads(linkedRails);
-
-            // Restore AI strategy if needed
+            player.setOwnedProperties(relink(player, player.getOwnedProperties(), PropertyTile.class));
+            player.setOwnedRailroads(relink(player, player.getOwnedRailroads(), RailroadTile.class));
             if (player instanceof AIPlayer ai) {
                 ai.restoreStrategyFromDifficulty();
             }
         }
-
-        // (Optional) Clear undo history
         commandHistory.clear();
     }
 
+    private <T extends OwnableTile> List<T> relink(Player owner, List<T> saved, Class<T> type) {
+        List<T> linked = new ArrayList<>();
+        if (saved == null) return linked;
+        for (T copy : saved) {
+            for (Tile tile : _game.getBoard().getTiles()) {
+                if (type.isInstance(tile) && tile.getName().equals(copy.getName())) {
+                    T boardTile = type.cast(tile);
+                    boardTile.setOwner(owner);
+                    linked.add(boardTile);
+                    break;
+                }
+            }
+        }
+        return linked;
+    }
 }

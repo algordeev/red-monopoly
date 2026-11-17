@@ -110,12 +110,12 @@ public class GameManager {
             pm(playerId, "ERR:Unknown cmd");
             return;
         }
-        if (!playerId.equals(controller.getCurrentPlayerName())) {
-            pm(playerId, "ERR:Not your turn");
-            return;
-        }
-
         SwingUtilities.invokeLater(() -> {
+            // Checked here, on the thread that runs turns, so two quick ROLLs can't both pass.
+            if (controller.isGameOver() || !playerId.equals(controller.getCurrentPlayerName())) {
+                pm(playerId, "ERR:Not your turn");
+                return;
+            }
             int[] dice = controller.rollDice();
             String outcome = controller.movePlayerAfterDiceRoll(dice);
 

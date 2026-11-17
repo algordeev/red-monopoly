@@ -1,198 +1,177 @@
 package Model;
 
-import javax.swing.JOptionPane;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
+/**
+ * Game rules for a single turn, split into two phases so a UI can animate in between:
+ * <ol>
+ *   <li>{@link #startTurn} decides whether and how far the player moves (jail rules,
+ *       GO salary) and updates their position, without resolving the destination;</li>
+ *   <li>{@link #finishTurn} resolves the destination tile, removes bankrupt players
+ *       and picks whose turn is next.</li>
+ * </ol>
+ * {@link #processTurn} runs both phases back to back.
+ */
 public class TurnHandler {
-    private static final int JAIL_RELEASE_FEE = 50;
-    private MonopolyGame game;
+    public static final int JAIL_RELEASE_FEE = 50;
+    /** Failed doubles attempts allowed before the fee must be paid (the third roll in jail). */
+    private static final int MAX_JAIL_ATTEMPTS = 3;
+
+    private final MonopolyGame game;
+
+    /** Result of {@link #startTurn}: who moved, from where, and how many steps (0 = stayed put). */
+    public record MovePlan(Player player, int from, int steps, String message) {
+        public boolean moved() {
+            return steps > 0;
+        }
+    }
 
     public TurnHandler(MonopolyGame game) {
         this.game = game;
     }
 
-    /**
-     * Processes the turn of a player given the dice results.
-     * @param player the player whose turn is processed.
-     * @param dice an array of two integers representing the dice values.
-     * @return A message summarizing the outcome of the turn.
-     */
+    /** Runs a whole turn without pausing between movement and landing. */
     public String processTurn(Player player, int[] dice) {
-        StringBuilder message = new StringBuilder();
-
-        if (player.isInJail()) {
-            message.append(processJailTurn(player, dice));
-        } else {
-            message.append(processNormalTurn(player, dice));
-        }
-
-        message.append(checkPlayerElimination());
-
-        // Advance turn if there is more than one player remaining.
-        if (game.getPlayers().size() > 1) {
-            game.nextTurn();
-        }
-
-        return message.toString();
+        return finishTurn(startTurn(player, dice));
     }
 
-    private String processJailTurn(Player player, int[] dice) {
+    public MovePlan startTurn(Player player, int[] dice) {
+        int from = player.getPosition();
         StringBuilder message = new StringBuilder();
-        int jailTurns = player.getJailTurnCount();
+        int steps = player.isInJail()
+                ? resolveJail(player, dice, message)
+                : dice[0] + dice[1];
 
-        String baseMessage = player.getName() + " is in Gulag (Turn " + (jailTurns + 1) +
-                ") and rolled " + dice[0] + " and " + dice[1] + ".";
-        JOptionPane.showMessageDialog(null, baseMessage);
-        message.append(baseMessage).append("\n");
-
-        if (jailTurns < 2) {
-            if (dice[0] == dice[1]) {
-                String msg = "Doubles! You're released from Gulag.";
-                JOptionPane.showMessageDialog(null, msg);
-                message.append(msg).append("\n");
-
-                player.setInJail(false);
-                player.resetJailTurn();
-                int roll = dice[0] + dice[1];
-                game.movePlayer(player, roll);
-            } else {
-                String msg = "No doubles. You remain in Gulag.";
-                JOptionPane.showMessageDialog(null, msg);
-                message.append(msg).append("\n");
-
-                player.incrementJailTurn();
-            }
-        } else {
-            if (dice[0] == dice[1]) {
-                String msg = "Doubles! You're released from Gulag.";
-                JOptionPane.showMessageDialog(null, msg);
-                message.append(msg).append("\n");
-
-                player.setInJail(false);
-                player.resetJailTurn();
-                int roll = dice[0] + dice[1];
-                game.movePlayer(player, roll);
-            } else {
-                if (player.getMoney() >= JAIL_RELEASE_FEE) {
-                    String msg = "No doubles. You've been in Gulag for 3 turns so you pay a fee of " +
-                            JAIL_RELEASE_FEE + " ₽ to get out.";
-                    JOptionPane.showMessageDialog(null, msg);
-                    message.append(msg).append("\n");
-
-                    player.deductMoney(JAIL_RELEASE_FEE);
-                    player.setInJail(false);
-                    player.resetJailTurn();
-                    int feeDie1 = game.rollSingleDie();
-                    int feeDie2 = game.rollSingleDie();
-                    int roll = feeDie1 + feeDie2;
-                    game.movePlayer(player, roll);
-                } else {
-                    String msg = "No doubles and you cannot afford the fee. You remain in Gulag.";
-                    JOptionPane.showMessageDialog(null, msg);
-                    message.append(msg).append("\n");
-                }
+        if (steps > 0) {
+            game.advancePlayer(player, steps);
+            message.append(player.getName()).append(" rolled ").append(dice[0]).append(" and ")
+                    .append(dice[1]).append(" and moved to ")
+                    .append(game.getBoard().getTile(player.getPosition()).getName()).append(".\n");
+            if (from + steps >= game.getBoard().getSize()) {
+                message.append("Passed GO: collected ").append(MonopolyGame.GO_SALARY).append(" ₽.\n");
             }
         }
-
-        return message.toString();
+        return new MovePlan(player, from, steps, message.toString());
     }
 
+    public String finishTurn(MovePlan plan) {
+        Player player = plan.player();
+        StringBuilder message = new StringBuilder(plan.message());
 
+        if (plan.moved()) {
+            Tile tile = game.getBoard().getTile(player.getPosition());
+            tile.action(player);
+        }
+        message.append(player.getName()).append(" balance: ").append(player.getMoney()).append(" ₽\n");
+        message.append(settleEndOfTurn(player));
+        return message.toString().trim();
+    }
 
-    private String processNormalTurn(Player player, int[] dice) {
-        StringBuilder message = new StringBuilder();
+    /** Applies the jail rules for this roll and returns how many steps the player moves (0 = stays). */
+    private int resolveJail(Player player, int[] dice, StringBuilder message) {
+        int attempt = player.getJailTurnCount() + 1;
         int roll = dice[0] + dice[1];
+        String msg = player.getName() + " is in the Gulag (turn " + attempt + ") and rolled "
+                + dice[0] + " and " + dice[1] + ". ";
 
-        game.movePlayer(player, roll);
-        Tile tile = game.getBoard().getTile(player.getPosition());
-        message.append(player.getName())
-                .append(" rolled a ")
-                .append(dice[0])
-                .append(" and a ")
-                .append(dice[1])
-                .append(" (total: ")
-                .append(roll)
-                .append(") and landed on ")
-                .append(tile.getName())
-                .append(".\n");
-
-        // Interaction based on tile type.
-        if (tile instanceof FreeParkingTile) {
-            message.append("You landed on Free Parking. Nothing happens.\n");
+        if (dice[0] == dice[1]) {
+            msg += "Doubles! Released from the Gulag.";
+        } else if (player.getGetOutOfJailCards() > 0) {
+            player.useGetOutOfJailCard();
+            msg += "Uses a \"Get Out of Gulag Free\" card.";
+        } else if (attempt >= MAX_JAIL_ATTEMPTS) {
+            player.deductMoney(JAIL_RELEASE_FEE);
+            msg += "No doubles after " + MAX_JAIL_ATTEMPTS + " turns: pays " + JAIL_RELEASE_FEE
+                    + " ₽ and leaves.";
+        } else {
+            player.incrementJailTurn();
+            msg += "No doubles. Stays in the Gulag.";
+            Prompter.get().inform("Gulag", msg);
+            message.append(msg).append('\n');
+            return 0;
         }
 
-        if (tile instanceof GoTile) {
-            message.append("You passed GO. Collect 200 ₽.\n");
-            player.addMoney(200);
-        }
+        player.setInJail(false);
+        player.resetJailTurn();
+        Prompter.get().inform("Gulag", msg);
+        message.append(msg).append('\n');
+        return roll;
+    }
 
-        if (tile instanceof GoToJailTile || tile instanceof JailTile) {
-            player.setInJail(true);
-            player.resetJailTurn();
-            if (tile instanceof GoToJailTile) {
-                player.setPosition(10);
+    /**
+     * Removes bankrupt players (returning their property to the bank), detects the end of
+     * the game, and hands the turn to the next player, honouring extra-turn and skip-turn cards.
+     */
+    private String settleEndOfTurn(Player mover) {
+        List<Player> players = game.getPlayers();
+        List<Player> turnOrder = new ArrayList<>(players);
+        StringBuilder message = new StringBuilder();
+
+        List<Player> bankrupt = turnOrder.stream().filter(p -> p.getMoney() < 0).toList();
+        if (!bankrupt.isEmpty()) {
+            for (Player p : bankrupt) {
+                releaseAssets(p);
             }
-            message.append("You landed on Go To Gulag. You are now in Gulag.\n");
+            players.removeAll(bankrupt);
+            String names = String.join(", ", bankrupt.stream().map(Player::getName).toList());
+            String msg = "Eliminated players due to negative balance: " + names;
+            message.append(msg).append('\n');
+            Prompter.get().inform("Eliminations", msg);
         }
 
-        if (tile instanceof PropertyTile) {
-            PropertyTile propertyTile = (PropertyTile) tile;
-            if (propertyTile.getOwner() == null) {
-                message.append("This property is unowned. Price: ")
-                        .append(propertyTile.getPrice())
-                        .append(" ₽.\n");
-            } else if (!propertyTile.getOwner().equals(player)) {
-                message.append("This property is owned by ")
-                        .append(propertyTile.getOwner().getName())
-                        .append(". Rent: ")
-                        .append(propertyTile.getRent())
-                        .append(" ₽.\n");
-            } else {
-                message.append("This property is owned by you.\n");
+        if (players.size() <= 1) {
+            game.setGameOver(true);
+            game.setCurrentPlayerIndex(0);
+            if (players.size() == 1) {
+                String msg = "Game Over! Winner: " + players.get(0).getName();
+                message.append(msg).append('\n');
+                Prompter.get().inform("Game Over", msg);
             }
+            return message.toString();
         }
 
-        if (tile instanceof TaxTile) {
-            TaxTile taxTile = (TaxTile) tile;
-            message.append("You landed on ")
-                    .append(taxTile.getName())
-                    .append(". Paying tax of ")
-                    .append(taxTile.getTaxAmount())
-                    .append(" ₽.\n");
-            player.deductMoney(taxTile.getTaxAmount());
-        }
-        message.append("Current balance: ")
-                .append(player.getMoney())
-                .append(" ₽\n");
+        Player next = chooseNextPlayer(mover, turnOrder, message);
+        game.setCurrentPlayerIndex(players.indexOf(next));
         return message.toString();
     }
 
-    private String checkPlayerElimination() {
+    private Player chooseNextPlayer(Player mover, List<Player> turnOrder, StringBuilder message) {
         List<Player> players = game.getPlayers();
-        List<String> eliminatedNames = players.stream()
-                .filter(p -> p.getMoney() < 0)
-                .map(Player::getName)
-                .collect(Collectors.toList());
-
-        StringBuilder message = new StringBuilder();
-
-        // Check eliminations
-        if (!eliminatedNames.isEmpty()) {
-            String eliminatedMsg = "Eliminated players due to negative balance: " + String.join(", ", eliminatedNames);
-            message.append(eliminatedMsg).append("\n"); // Append to return string
-            JOptionPane.showMessageDialog(null, eliminatedMsg, "Eliminations", JOptionPane.INFORMATION_MESSAGE); // Show dialog
-            players.removeIf(p -> p.getMoney() < 0); // Remove eliminated players
+        if (mover.hasExtraTurn()) {
+            mover.resetExtraTurn();
+            if (players.contains(mover)) {
+                message.append(mover.getName()).append(" takes another turn.\n");
+                return mover;
+            }
         }
 
-        // Check winner
-        if (players.size() == 1) {
-            String winnerMsg = "Game Over! Winner: " + players.get(0).getName();
-            message.append(winnerMsg); // Append to return string
-            JOptionPane.showMessageDialog(null, winnerMsg, "Game Over", JOptionPane.INFORMATION_MESSAGE); // Show dialog
+        int start = turnOrder.indexOf(mover);
+        // Two laps at most: the first lap may clear skip flags, the second always finds someone.
+        for (int i = 1; i <= turnOrder.size() * 2; i++) {
+            Player candidate = turnOrder.get((start + i) % turnOrder.size());
+            if (!players.contains(candidate)) continue;
+            if (candidate.shouldSkipTurn() && candidate != mover) {
+                candidate.resetSkipTurn();
+                String msg = candidate.getName() + " skips this turn.";
+                message.append(msg).append('\n');
+                Prompter.get().inform("Turn skipped", msg);
+                continue;
+            }
+            if (candidate == mover) mover.resetSkipTurn();
+            return candidate;
         }
+        return players.get(0);
+    }
 
-        return message.toString().trim(); // Return the combined message
+    private void releaseAssets(Player player) {
+        for (Tile t : game.getBoard().getTiles()) {
+            if (t instanceof OwnableTile o && o.getOwner() == player) {
+                o.release();
+            }
+        }
+        player.getOwnedProperties().clear();
+        player.getOwnedRailroads().clear();
     }
 
     private static int GLOBAL_DELAY_MS = 1000;
@@ -204,6 +183,4 @@ public class TurnHandler {
     public static int getGlobalDelay() {
         return GLOBAL_DELAY_MS;
     }
-
-
 }
