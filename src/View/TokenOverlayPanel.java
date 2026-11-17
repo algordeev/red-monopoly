@@ -24,6 +24,10 @@ import java.util.Map;
 public class TokenOverlayPanel extends JPanel {
     private static final String DEFAULT_AVATAR = "/players/player1.png";
     private static final Color CURRENT_PLAYER_RING = new Color(255, 215, 0);
+    /** Same token size as before the overlay rewrite. */
+    private static final int TOKEN_SIZE = 60;
+    /** Largest fraction of a token that another token on the same tile may cover. */
+    private static final double MAX_OVERLAP = 0.6;
 
     private final Controller controller;
     private final BoardPanel boardPanel;
@@ -101,43 +105,42 @@ public class TokenOverlayPanel extends JPanel {
 
     private void drawTokens(Graphics2D g2, Rectangle tile, List<Player> tokens, Player current) {
         int n = tokens.size();
-        int pad = Math.max(2, Math.min(tile.width, tile.height) / 14);
-        int w = tile.width - 2 * pad, h = tile.height - 2 * pad;
+        int size = TOKEN_SIZE;
+        // Tokens keep their full size; when several share a tile they fan out and overlap
+        // partly, but never by more than MAX_OVERLAP, so each one stays visible.
+        double minStep = size * (1 - MAX_OVERLAP);
 
-        // Pick the grid shape that gives the largest cells.
+        // Pick the grid shape whose spacing is closest to full-size tokens side by side.
         int bestCols = 1;
-        double bestCell = 0;
+        double bestStep = -1;
         for (int cols = 1; cols <= n; cols++) {
             int rows = (n + cols - 1) / cols;
-            double cell = Math.min(w / (double) cols, h / (double) rows);
-            if (cell > bestCell) {
-                bestCell = cell;
+            double step = Math.min(stepFor(tile.width, cols, size), stepFor(tile.height, rows, size));
+            if (step > bestStep) {
+                bestStep = step;
                 bestCols = cols;
             }
         }
         int cols = bestCols;
         int rows = (n + cols - 1) / cols;
-        // One token alone shouldn't cover the whole tile.
-        int size = (int) Math.min(bestCell * 0.95, Math.min(w, h) * 0.7);
-        if (size < 4) return;
+        double step = Math.max(bestStep, minStep);
 
-        int gridW = (int) (cols * bestCell), gridH = (int) (rows * bestCell);
-        int x0 = tile.x + pad + (w - gridW) / 2;
-        int y0 = tile.y + pad + (h - gridH) / 2;
+        double gridW = size + (cols - 1) * step, gridH = size + (rows - 1) * step;
+        double x0 = tile.getCenterX() - gridW / 2;
+        double y0 = tile.getCenterY() - gridH / 2;
 
         for (int i = 0; i < n; i++) {
             Player p = tokens.get(i);
             int row = i / cols, col = i % cols;
             // Centre a partially filled last row.
             int inRow = (row == rows - 1) ? n - row * cols : cols;
-            double rowOffset = (cols - inRow) * bestCell / 2;
-            int cx = (int) (x0 + rowOffset + col * bestCell + bestCell / 2);
-            int cy = (int) (y0 + row * bestCell + bestCell / 2);
-            int x = cx - size / 2, y = cy - size / 2;
+            double rowOffset = (cols - inRow) * step / 2;
+            int x = (int) (x0 + rowOffset + col * step);
+            int y = (int) (y0 + row * step);
 
             if (p == current) {
                 g2.setColor(CURRENT_PLAYER_RING);
-                g2.setStroke(new BasicStroke(Math.max(2f, size / 14f)));
+                g2.setStroke(new BasicStroke(3f));
                 g2.drawOval(x - 1, y - 1, size + 2, size + 2);
             }
             BufferedImage img = avatarFor(p);
@@ -145,5 +148,11 @@ public class TokenOverlayPanel extends JPanel {
                 g2.drawImage(img, x, y, size, size, null);
             }
         }
+    }
+
+    /** Distance between token origins so {@code count} tokens fit in {@code length}, up to a full token apart. */
+    private static double stepFor(int length, int count, int size) {
+        if (count <= 1) return size;
+        return Math.min(size, (length - size) / (double) (count - 1));
     }
 }
